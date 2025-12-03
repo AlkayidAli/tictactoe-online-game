@@ -180,3 +180,6 @@ powershell -NoProfile -Command "Invoke-RestMethod -Uri http://localhost:3002/roo
 
 - In-memory data stores; no persistence
 - Minimal error handling; extend as needed
+
+
+### clients
