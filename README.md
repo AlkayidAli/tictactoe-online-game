@@ -6,7 +6,7 @@ This repository contains:
 
 - services/
   - user-service (Node/Express) — port 3001
-  - room-service (SvelteKit + Socket.IO) — port 3002
+  - room-service (Express + Socket.IO) — port 3002
   - game-service (Node/Express) — port 3003
 - clients/
   - cli-client (Node + socket.io-client)
@@ -33,10 +33,10 @@ User Service Game Service
 ^ ^
 | |
 | |
-+---- Room Service (3002; SvelteKit + Socket.IO) ----+
++---- Room Service (3002; Socket.IO) ----+
 ^ |
 | |
-Web/CLI/Mobile <----------------------+
+Web/CLI/Mobile <----------+
 
 ## Services
 
@@ -110,9 +110,9 @@ powershell -NoProfile -Command "Invoke-RestMethod -Uri http://localhost:3003/mov
 powershell -NoProfile -Command "Invoke-RestMethod -Uri http://localhost:3003/move -Method Post -Body (@{ board = @('X','X','','O','O','','','',''); position = 2; symbol = 'X'; expectedTurn = 'X' } | ConvertTo-Json) -ContentType 'application/json' | ConvertTo-Json"
 ```
 
-### Room Service (port 3002) — planned
+### Room Service (port 3002)
 
-- Stack: SvelteKit (adapter-node) + Socket.IO
+- Stack: Express + Socket.IO
 - HTTP:
   - POST /rooms { roomId? } -> { roomId }
   - GET /health -> { ok: true }
@@ -129,14 +129,32 @@ powershell -NoProfile -Command "Invoke-RestMethod -Uri http://localhost:3003/mov
   - Validate users via User Service: GET http://localhost:3001/users/:username
   - Validate and apply moves via Game Service: POST http://localhost:3003/move
 
-## Clients
+Run locally (PowerShell):
 
-### CLI Client — planned
+```
+cd "services/room-service"
+npm install
+npm start
+```
+
+Quick checks (PowerShell examples):
+
+```
+# Health
+powershell -NoProfile -Command "Invoke-RestMethod -Uri http://localhost:3002/health | ConvertTo-Json"
+
+# Create a room
+powershell -NoProfile -Command "Invoke-RestMethod -Uri http://localhost:3002/rooms -Method Post -Body (@{ roomId = '' } | ConvertTo-Json) -ContentType 'application/json' | ConvertTo-Json"
+```
+
+## Clients (upcoming)
+
+### CLI Client
 
 - Node script using socket.io-client and readline.
 - Connects to ws://localhost:3002, join/create room, and play from terminal.
 
-### Web/Mobile Client — planned
+### Web/Mobile Client
 
 - SvelteKit app using socket.io-client.
 - Pages: Login/Join room and Tic-Tac-Toe board.
