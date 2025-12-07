@@ -147,12 +147,9 @@ powershell -NoProfile -Command "Invoke-RestMethod -Uri http://localhost:3002/hea
 powershell -NoProfile -Command "Invoke-RestMethod -Uri http://localhost:3002/rooms -Method Post -Body (@{ roomId = '' } | ConvertTo-Json) -ContentType 'application/json' | ConvertTo-Json"
 ```
 
-## Clients (upcoming)
+## Clients (upcoming)e
 
 ### CLI Client
-
-- Node script using socket.io-client and readline.
-- Connects to ws://localhost:3002, join/create room, and play from terminal.
 
 ### Web/Mobile Client
 
@@ -162,6 +159,7 @@ powershell -NoProfile -Command "Invoke-RestMethod -Uri http://localhost:3002/roo
 
 ## Game Rules
 
+- The CLI will auto-create a user profile if it doesn't exist.
 - 3x3 board
 - Two players "X" and "O"
 - X moves first; turns alternate
@@ -170,6 +168,13 @@ powershell -NoProfile -Command "Invoke-RestMethod -Uri http://localhost:3002/roo
 ## Demo Checklist
 
 - Start 3 services in separate terminals
+- Or start all services with one command (PowerShell):
+
+```
+cd "d:\Alio\University\semester 7\Programming 5\New folder\tictactoe-online-game"
+powershell -NoProfile -File .\start-services.ps1
+```
+
 - Web (or CLI) clients connect to Room Service
 - Register/login via User Service (register once)
 - Create room and join from two clients

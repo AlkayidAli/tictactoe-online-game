@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import crypto from 'crypto';
+import fetch from 'node-fetch';
 
 const PORT = process.env.PORT || 3002;
 const USER_SERVICE_BASE = process.env.USER_SERVICE_BASE || 'http://localhost:3001';
@@ -116,9 +117,30 @@ io.on('connection', (socket) => {
           symbols: room.symbols,
           nextTurnSymbol: room.nextTurnSymbol
         });
+        // Broadcast initial board state
+        io.to(roomId).emit('state_update', {
+          roomId,
+          board: room.board,
+          nextTurnSymbol: room.nextTurnSymbol,
+          winner: room.winner,
+          draw: room.draw
+        });
+        // Notify whose turn
+        const currentPlayer = Object.entries(room.symbols).find(([_p, sym]) => sym === room.nextTurnSymbol)?.[0];
+        if (currentPlayer) {
+          io.to(roomId).emit('your_turn', { roomId, symbol: room.nextTurnSymbol, player: currentPlayer });
+        }
       }
       socket.join(roomId);
       io.to(roomId).emit('player_joined', { roomId, players: room.players });
+      // Send snapshot to the newly joined player
+      socket.emit('state_update', {
+        roomId,
+        board: room.board,
+        nextTurnSymbol: room.nextTurnSymbol,
+        winner: room.winner,
+        draw: room.draw
+      });
     } catch (err) {
       socket.emit('error', { error: err.message });
     }
@@ -135,6 +157,28 @@ io.on('connection', (socket) => {
         socket.emit('error', { error: 'player not in room' });
         return;
       }
+      // Enforce turn-based play
+      const playerSymbol = room.symbols[player];
+      if (!playerSymbol) {
+        socket.emit('error', { error: 'player has no assigned symbol' });
+        return;
+      }
+      if (room.winner || room.draw) {
+        socket.emit('error', { error: 'game already finished' });
+        return;
+      }
+      if (playerSymbol !== room.nextTurnSymbol) {
+        socket.emit('error', { error: 'not your turn' });
+        return;
+      }
+      if (typeof position !== 'number' || position < 0 || position > 8) {
+        socket.emit('error', { error: 'invalid position' });
+        return;
+      }
+      if (room.board[position] !== '') {
+        socket.emit('error', { error: 'position already taken' });
+        return;
+      }
       const result = await applyMove(room, position, player);
       io.to(roomId).emit('state_update', {
         roomId,
@@ -143,6 +187,13 @@ io.on('connection', (socket) => {
         winner: room.winner,
         draw: room.draw
       });
+      // Announce next turn
+      if (!room.winner && !room.draw) {
+        const nextPlayer = Object.entries(room.symbols).find(([_p, sym]) => sym === room.nextTurnSymbol)?.[0];
+        if (nextPlayer) {
+          io.to(roomId).emit('your_turn', { roomId, symbol: room.nextTurnSymbol, player: nextPlayer });
+        }
+      }
       if (room.winner || room.draw) {
         io.to(roomId).emit('game_over', { roomId, winner: room.winner, draw: room.draw });
       }
