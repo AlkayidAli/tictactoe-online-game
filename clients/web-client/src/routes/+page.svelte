@@ -47,9 +47,16 @@
 
   async function fetchLeaderboard() {
     try {
+      console.log(
+        "Fetching leaderboard from:",
+        `${USER_SERVICE_HTTP}/leaderboard?limit=10`
+      );
       const res = await fetch(`${USER_SERVICE_HTTP}/leaderboard?limit=10`);
       if (res.ok) {
         leaderboard = await res.json();
+        console.log("Leaderboard data:", leaderboard);
+      } else {
+        console.error("Leaderboard fetch failed with status:", res.status);
       }
     } catch (err) {
       console.error("Failed to fetch leaderboard:", err);
@@ -58,6 +65,9 @@
 
   onMount(() => {
     fetchLeaderboard();
+    // Refresh leaderboard every 10 seconds
+    const interval = setInterval(fetchLeaderboard, 10000);
+    return () => clearInterval(interval);
   });
 
   async function registerUser() {
@@ -893,9 +903,36 @@
     margin-top: 2rem;
   }
 
+  @media (max-width: 1024px) {
+    .main-content {
+      flex-direction: column;
+    }
+
+    .leaderboard-panel {
+      width: 100%;
+      max-width: 600px;
+      margin: 0 auto;
+      position: static;
+    }
+  }
+
   @media (max-width: 640px) {
     .title {
-      font-size: 2rem;
+      font-size: 1.5rem;
+    }
+
+    .subtitle {
+      font-size: 0.85rem;
+    }
+
+    .header-content {
+      flex-direction: column;
+      gap: 1rem;
+      padding: 1rem;
+    }
+
+    .btn-leaderboard {
+      width: 100%;
     }
 
     .board {
@@ -908,6 +945,14 @@
 
     .button-group {
       flex-direction: column;
+    }
+
+    .leaderboard-panel {
+      padding: 1rem;
+    }
+
+    .panel-title {
+      font-size: 1.25rem;
     }
   }
 </style>
