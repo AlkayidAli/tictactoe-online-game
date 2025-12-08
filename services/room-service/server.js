@@ -2,6 +2,8 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import crypto from 'crypto';
+import fetch from 'node-fetch';
+import cors from 'cors';
 
 const PORT = process.env.PORT || 3002;
 const USER_SERVICE_BASE = process.env.USER_SERVICE_BASE || 'http://localhost:3001';
@@ -26,6 +28,19 @@ function createRoom(roomId) {
     });
   }
   return roomId;
+}
+
+function resetRoom(roomId) {
+  const room = rooms.get(roomId);
+  if (!room) {
+    throw new Error('Room not found');
+  }
+  // Keep players and symbols, reset game state
+  room.board = Array(9).fill('');
+  room.nextTurnSymbol = 'X';
+  room.winner = null;
+  room.draw = false;
+  return room;
 }
 
 async function validateUser(username) {
@@ -62,8 +77,42 @@ async function applyMove(room, position, player) {
   return data;
 }
 
+async function updatePlayerStats(room) {
+  if (room.draw) {
+    // Both players get a draw
+    for (const player of room.players) {
+      await fetch(`${USER_SERVICE_BASE}/users/${encodeURIComponent(player)}/stats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result: 'draw' })
+      }).catch(err => console.error(`Failed to update stats for ${player}:`, err));
+    }
+  } else if (room.winner) {
+    // Find winner and loser
+    const winnerUsername = Object.entries(room.symbols).find(([_, sym]) => sym === room.winner)?.[0];
+    const loserUsername = room.players.find(p => p !== winnerUsername);
+    
+    if (winnerUsername) {
+      await fetch(`${USER_SERVICE_BASE}/users/${encodeURIComponent(winnerUsername)}/stats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result: 'win' })
+      }).catch(err => console.error(`Failed to update stats for ${winnerUsername}:`, err));
+    }
+    
+    if (loserUsername) {
+      await fetch(`${USER_SERVICE_BASE}/users/${encodeURIComponent(loserUsername)}/stats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result: 'loss' })
+      }).catch(err => console.error(`Failed to update stats for ${loserUsername}:`, err));
+    }
+  }
+}
+
 // Express + Socket.IO setup
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 // Basic HTTP endpoints
@@ -99,6 +148,9 @@ io.on('connection', (socket) => {
         socket.emit('error', { error: 'user not found' });
         return;
       }
+      // Join room first
+      socket.join(roomId);
+      
       if (!room.players.includes(username)) {
         if (room.players.length >= 2) {
           socket.emit('error', { error: 'room full' });
@@ -106,19 +158,65 @@ io.on('connection', (socket) => {
         }
         room.players.push(username);
       }
+      
+      io.to(roomId).emit('player_joined', { roomId, players: room.players });
+      
+      console.log(`[DEBUG] Room ${roomId}: players=${room.players.length}, symbols=${Object.keys(room.symbols).length}, username=${username}`);
+      
       // Assign symbols if starting
       if (room.players.length === 2 && Object.keys(room.symbols).length < 2) {
+        console.log('[DEBUG] First time both players joined - assigning symbols');
         room.symbols[room.players[0]] = 'X';
         room.symbols[room.players[1]] = 'O';
+        console.log('Emitting game_start to room', roomId, 'with symbols:', room.symbols);
         io.to(roomId).emit('game_start', {
           roomId,
           players: room.players,
           symbols: room.symbols,
           nextTurnSymbol: room.nextTurnSymbol
         });
+        console.log('game_start emitted');
+        // Broadcast initial board state
+        io.to(roomId).emit('state_update', {
+          roomId,
+          board: room.board,
+          nextTurnSymbol: room.nextTurnSymbol,
+          winner: room.winner,
+          draw: room.draw
+        });
+        // Notify whose turn
+        const currentPlayer = Object.entries(room.symbols).find(([_p, sym]) => sym === room.nextTurnSymbol)?.[0];
+        if (currentPlayer) {
+          io.to(roomId).emit('your_turn', { roomId, symbol: room.nextTurnSymbol, player: currentPlayer });
+        }
+      } else if (Object.keys(room.symbols).length === 2) {
+        console.log(`[DEBUG] Game already started - sending game_start to ${username} with symbols:`, room.symbols);
+        // Game already started - send game_start to this specific player so they know their symbol
+        socket.emit('game_start', {
+          roomId,
+          players: room.players,
+          symbols: room.symbols,
+          nextTurnSymbol: room.nextTurnSymbol
+        });
+        // Send current board state
+        socket.emit('state_update', {
+          roomId,
+          board: room.board,
+          nextTurnSymbol: room.nextTurnSymbol,
+          winner: room.winner,
+          draw: room.draw
+        });
+      } else {
+        console.log('[DEBUG] Waiting for second player - sending state_update only');
+        // Send snapshot to the newly joined player only if game hasn't started
+        socket.emit('state_update', {
+          roomId,
+          board: room.board,
+          nextTurnSymbol: room.nextTurnSymbol,
+          winner: room.winner,
+          draw: room.draw
+        });
       }
-      socket.join(roomId);
-      io.to(roomId).emit('player_joined', { roomId, players: room.players });
     } catch (err) {
       socket.emit('error', { error: err.message });
     }
@@ -135,6 +233,28 @@ io.on('connection', (socket) => {
         socket.emit('error', { error: 'player not in room' });
         return;
       }
+      // Enforce turn-based play
+      const playerSymbol = room.symbols[player];
+      if (!playerSymbol) {
+        socket.emit('error', { error: 'player has no assigned symbol' });
+        return;
+      }
+      if (room.winner || room.draw) {
+        socket.emit('error', { error: 'game already finished' });
+        return;
+      }
+      if (playerSymbol !== room.nextTurnSymbol) {
+        socket.emit('error', { error: 'not your turn' });
+        return;
+      }
+      if (typeof position !== 'number' || position < 0 || position > 8) {
+        socket.emit('error', { error: 'invalid position' });
+        return;
+      }
+      if (room.board[position] !== '') {
+        socket.emit('error', { error: 'position already taken' });
+        return;
+      }
       const result = await applyMove(room, position, player);
       io.to(roomId).emit('state_update', {
         roomId,
@@ -143,8 +263,57 @@ io.on('connection', (socket) => {
         winner: room.winner,
         draw: room.draw
       });
+      // Announce next turn
+      if (!room.winner && !room.draw) {
+        const nextPlayer = Object.entries(room.symbols).find(([_p, sym]) => sym === room.nextTurnSymbol)?.[0];
+        if (nextPlayer) {
+          io.to(roomId).emit('your_turn', { roomId, symbol: room.nextTurnSymbol, player: nextPlayer });
+        }
+      }
       if (room.winner || room.draw) {
         io.to(roomId).emit('game_over', { roomId, winner: room.winner, draw: room.draw });
+        
+        // Update player stats
+        updatePlayerStats(room).catch(err => console.error('Failed to update stats:', err));
+      }
+    } catch (err) {
+      socket.emit('error', { error: err.message });
+    }
+  });
+
+  socket.on('restart_game', ({ roomId }) => {
+    try {
+      if (!roomId) {
+        socket.emit('error', { error: 'roomId required' });
+        return;
+      }
+      if (!rooms.has(roomId)) {
+        socket.emit('error', { error: 'room not found' });
+        return;
+      }
+      const room = resetRoom(roomId);
+      console.log(`Game restarted in room ${roomId}`);
+      
+      // Notify all players in the room
+      io.to(roomId).emit('game_restarted', {
+        roomId,
+        board: room.board,
+        nextTurnSymbol: room.nextTurnSymbol
+      });
+      
+      // Send state update
+      io.to(roomId).emit('state_update', {
+        roomId,
+        board: room.board,
+        nextTurnSymbol: room.nextTurnSymbol,
+        winner: room.winner,
+        draw: room.draw
+      });
+      
+      // Notify whose turn
+      const firstPlayer = Object.entries(room.symbols).find(([_p, sym]) => sym === 'X')?.[0];
+      if (firstPlayer) {
+        io.to(roomId).emit('your_turn', { roomId, symbol: 'X', player: firstPlayer });
       }
     } catch (err) {
       socket.emit('error', { error: err.message });
