@@ -30,6 +30,19 @@ function createRoom(roomId) {
   return roomId;
 }
 
+function resetRoom(roomId) {
+  const room = rooms.get(roomId);
+  if (!room) {
+    throw new Error('Room not found');
+  }
+  // Keep players and symbols, reset game state
+  room.board = Array(9).fill('');
+  room.nextTurnSymbol = 'X';
+  room.winner = null;
+  room.draw = false;
+  return room;
+}
+
 async function validateUser(username) {
   const res = await fetch(`${USER_SERVICE_BASE}/users/${encodeURIComponent(username)}`);
   if (!res.ok) return false;
@@ -226,6 +239,45 @@ io.on('connection', (socket) => {
       }
       if (room.winner || room.draw) {
         io.to(roomId).emit('game_over', { roomId, winner: room.winner, draw: room.draw });
+      }
+    } catch (err) {
+      socket.emit('error', { error: err.message });
+    }
+  });
+
+  socket.on('restart_game', ({ roomId }) => {
+    try {
+      if (!roomId) {
+        socket.emit('error', { error: 'roomId required' });
+        return;
+      }
+      if (!rooms.has(roomId)) {
+        socket.emit('error', { error: 'room not found' });
+        return;
+      }
+      const room = resetRoom(roomId);
+      console.log(`Game restarted in room ${roomId}`);
+      
+      // Notify all players in the room
+      io.to(roomId).emit('game_restarted', {
+        roomId,
+        board: room.board,
+        nextTurnSymbol: room.nextTurnSymbol
+      });
+      
+      // Send state update
+      io.to(roomId).emit('state_update', {
+        roomId,
+        board: room.board,
+        nextTurnSymbol: room.nextTurnSymbol,
+        winner: room.winner,
+        draw: room.draw
+      });
+      
+      // Notify whose turn
+      const firstPlayer = Object.entries(room.symbols).find(([_p, sym]) => sym === 'X')?.[0];
+      if (firstPlayer) {
+        io.to(roomId).emit('your_turn', { roomId, symbol: 'X', player: firstPlayer });
       }
     } catch (err) {
       socket.emit('error', { error: err.message });

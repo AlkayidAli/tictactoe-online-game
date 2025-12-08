@@ -185,6 +185,21 @@
       }
     });
 
+    socket.on(
+      "game_restarted",
+      ({ roomId: rid, board, nextTurnSymbol: nextTurn }) => {
+        console.log("Game restarted");
+        currentBoard = board;
+        nextTurnSymbol = nextTurn;
+        gameState = "playing";
+        winner = null;
+        isDraw = false;
+        isMyTurn = mySymbol === nextTurn;
+        statusMessage =
+          "Game restarted! " + (isMyTurn ? "Your turn!" : "Opponent's turn");
+      }
+    );
+
     // Register connect handler LAST, after all other handlers are set up
     socket.on("connect", () => {
       console.log("Connected to Room Service");
@@ -240,6 +255,11 @@
         statusMessage = "Waiting for opponent to join...";
       }
     }, 2000);
+  }
+
+  function restartGame() {
+    if (!socket || !roomId) return;
+    socket.emit("restart_game", { roomId });
   }
 
   function resetGame() {
@@ -402,6 +422,11 @@
       </div>
 
       <div class="game-actions">
+        {#if winner || isDraw}
+          <button class="btn btn-secondary" onclick={restartGame}
+            >Play Again</button
+          >
+        {/if}
         <button class="btn btn-primary" onclick={resetGame}>New Game</button>
       </div>
     </div>
