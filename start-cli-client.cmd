@@ -2,6 +2,6 @@
 echo Starting CLI Client...
 echo.
 
-cd clients\cli-client
+cd /d "%~dp0clients\cli-client"
 
 node index.js

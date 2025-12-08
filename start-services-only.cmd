@@ -3,17 +3,17 @@ echo Starting Backend Services...
 echo.
 
 echo Starting User Service on port 3001...
-start "User Service" cmd /k "cd services\user-service && npm start"
+start "User Service" cmd /k "cd /d "%~dp0services\user-service" && npm start"
 
 timeout /t 2 /nobreak > nul
 
 echo Starting Room Service on port 3002...
-start "Room Service" cmd /k "cd services\room-service && npm start"
+start "Room Service" cmd /k "cd /d "%~dp0services\room-service" && npm start"
 
 timeout /t 2 /nobreak > nul
 
 echo Starting Game Service on port 3003...
-start "Game Service" cmd /k "cd services\game-service && npm start"
+start "Game Service" cmd /k "cd /d "%~dp0services\game-service" && npm start"
 
 echo.
 echo All backend services started!

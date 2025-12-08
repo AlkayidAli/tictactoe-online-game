@@ -2,7 +2,7 @@
 echo Starting Web Client...
 echo.
 
-cd clients\web-client
+cd /d "%~dp0clients\web-client"
 
 echo Web client starting on http://localhost:5173
 echo.
