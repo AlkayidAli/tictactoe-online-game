@@ -18,11 +18,20 @@
   let players = $state<string[]>([]);
   let errorMessage = $state("");
   let statusMessage = $state("");
+  let isMyTurn = $state(false);
   let socket: Socket | null = null;
 
   $effect(() => {
+    console.log(
+      "$effect running - mySymbol:",
+      mySymbol,
+      "nextTurnSymbol:",
+      nextTurnSymbol,
+      "isMyTurn:",
+      isMyTurn
+    );
     if (mySymbol && nextTurnSymbol) {
-      const isMyTurn = mySymbol === nextTurnSymbol;
+      isMyTurn = mySymbol === nextTurnSymbol;
       if (gameState === "playing" && !winner && !isDraw) {
         statusMessage = isMyTurn
           ? "🎮 Your turn! Click a cell to play."
@@ -68,15 +77,12 @@
   }
 
   function setupSocket() {
-    socket = io(ROOM_SERVICE_WS, { transports: ["websocket"] });
-
-    socket.on("connect", () => {
-      console.log("Connected to Room Service");
-      if (roomId && username) {
-        socket!.emit("join_room", { roomId, username });
-      }
+    socket = io(ROOM_SERVICE_WS, {
+      transports: ["websocket"],
+      autoConnect: false,
     });
 
+    // Register all event handlers FIRST
     socket.on("connect_error", (err) => {
       errorMessage = "Connection error: " + err.message;
     });
@@ -93,10 +99,22 @@
     socket.on(
       "game_start",
       ({ roomId: rid, players: p, symbols, nextTurnSymbol: nextTurn }) => {
+        console.log("GAME_START received:", {
+          players: p,
+          symbols,
+          nextTurn,
+          username,
+        });
         gameState = "playing";
         players = p;
         mySymbol = symbols[username];
         nextTurnSymbol = nextTurn;
+        console.log(
+          "After game_start - mySymbol:",
+          mySymbol,
+          "nextTurnSymbol:",
+          nextTurnSymbol
+        );
         statusMessage = `Game started! You are ${mySymbol}`;
       }
     );
@@ -116,10 +134,27 @@
         winner: "X" | "O" | null;
         draw: boolean;
       }) => {
+        console.log("State update received:", {
+          board,
+          nextTurn,
+          mySymbol,
+          username,
+        });
         currentBoard = board;
         nextTurnSymbol = nextTurn;
         winner = w;
         isDraw = draw;
+
+        // Update whose turn it is
+        isMyTurn = !w && !draw && mySymbol === nextTurn;
+        console.log(
+          "isMyTurn after state_update:",
+          isMyTurn,
+          "mySymbol:",
+          mySymbol,
+          "nextTurn:",
+          nextTurn
+        );
 
         if (w || draw) {
           gameState = "finished";
@@ -134,6 +169,7 @@
 
     socket.on("your_turn", ({ roomId: rid, symbol, player }) => {
       if (player === username) {
+        isMyTurn = true;
         statusMessage = "🎮 Your turn!";
       }
     });
@@ -148,6 +184,17 @@
         statusMessage = "🤝 It's a draw!";
       }
     });
+
+    // Register connect handler LAST, after all other handlers are set up
+    socket.on("connect", () => {
+      console.log("Connected to Room Service");
+      if (roomId && username) {
+        socket!.emit("join_room", { roomId, username });
+      }
+    });
+
+    // Now connect manually after all handlers are registered
+    socket.connect();
   }
 
   async function handleJoinOrCreate(createNew: boolean) {
@@ -178,7 +225,7 @@
   function handleCellClick(position: number) {
     if (!socket) return;
     if (gameState !== "playing") return;
-    if (mySymbol !== nextTurnSymbol) return;
+    if (!isMyTurn) return;
     if (currentBoard[position] !== "") return;
     if (winner || isDraw) return;
 
@@ -331,13 +378,13 @@
               class:cell-x={cell === "X"}
               class:cell-o={cell === "O"}
               class:cell-clickable={gameState === "playing" &&
-                mySymbol === nextTurnSymbol &&
+                isMyTurn &&
                 cell === "" &&
                 !winner &&
                 !isDraw}
               onclick={() => handleCellClick(i)}
               disabled={gameState !== "playing" ||
-                mySymbol !== nextTurnSymbol ||
+                !isMyTurn ||
                 cell !== "" ||
                 !!winner ||
                 isDraw}

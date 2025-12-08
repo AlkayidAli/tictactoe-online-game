@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import crypto from 'crypto';
 import fetch from 'node-fetch';
+import cors from 'cors';
 
 const PORT = process.env.PORT || 3002;
 const USER_SERVICE_BASE = process.env.USER_SERVICE_BASE || 'http://localhost:3001';
@@ -65,6 +66,7 @@ async function applyMove(room, position, player) {
 
 // Express + Socket.IO setup
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 // Basic HTTP endpoints
@@ -100,6 +102,9 @@ io.on('connection', (socket) => {
         socket.emit('error', { error: 'user not found' });
         return;
       }
+      // Join room first
+      socket.join(roomId);
+      
       if (!room.players.includes(username)) {
         if (room.players.length >= 2) {
           socket.emit('error', { error: 'room full' });
@@ -107,16 +112,24 @@ io.on('connection', (socket) => {
         }
         room.players.push(username);
       }
+      
+      io.to(roomId).emit('player_joined', { roomId, players: room.players });
+      
+      console.log(`[DEBUG] Room ${roomId}: players=${room.players.length}, symbols=${Object.keys(room.symbols).length}, username=${username}`);
+      
       // Assign symbols if starting
       if (room.players.length === 2 && Object.keys(room.symbols).length < 2) {
+        console.log('[DEBUG] First time both players joined - assigning symbols');
         room.symbols[room.players[0]] = 'X';
         room.symbols[room.players[1]] = 'O';
+        console.log('Emitting game_start to room', roomId, 'with symbols:', room.symbols);
         io.to(roomId).emit('game_start', {
           roomId,
           players: room.players,
           symbols: room.symbols,
           nextTurnSymbol: room.nextTurnSymbol
         });
+        console.log('game_start emitted');
         // Broadcast initial board state
         io.to(roomId).emit('state_update', {
           roomId,
@@ -130,17 +143,34 @@ io.on('connection', (socket) => {
         if (currentPlayer) {
           io.to(roomId).emit('your_turn', { roomId, symbol: room.nextTurnSymbol, player: currentPlayer });
         }
+      } else if (Object.keys(room.symbols).length === 2) {
+        console.log(`[DEBUG] Game already started - sending game_start to ${username} with symbols:`, room.symbols);
+        // Game already started - send game_start to this specific player so they know their symbol
+        socket.emit('game_start', {
+          roomId,
+          players: room.players,
+          symbols: room.symbols,
+          nextTurnSymbol: room.nextTurnSymbol
+        });
+        // Send current board state
+        socket.emit('state_update', {
+          roomId,
+          board: room.board,
+          nextTurnSymbol: room.nextTurnSymbol,
+          winner: room.winner,
+          draw: room.draw
+        });
+      } else {
+        console.log('[DEBUG] Waiting for second player - sending state_update only');
+        // Send snapshot to the newly joined player only if game hasn't started
+        socket.emit('state_update', {
+          roomId,
+          board: room.board,
+          nextTurnSymbol: room.nextTurnSymbol,
+          winner: room.winner,
+          draw: room.draw
+        });
       }
-      socket.join(roomId);
-      io.to(roomId).emit('player_joined', { roomId, players: room.players });
-      // Send snapshot to the newly joined player
-      socket.emit('state_update', {
-        roomId,
-        board: room.board,
-        nextTurnSymbol: room.nextTurnSymbol,
-        winner: room.winner,
-        draw: room.draw
-      });
     } catch (err) {
       socket.emit('error', { error: err.message });
     }
