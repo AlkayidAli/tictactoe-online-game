@@ -77,6 +77,39 @@ async function applyMove(room, position, player) {
   return data;
 }
 
+async function updatePlayerStats(room) {
+  if (room.draw) {
+    // Both players get a draw
+    for (const player of room.players) {
+      await fetch(`${USER_SERVICE_BASE}/users/${encodeURIComponent(player)}/stats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result: 'draw' })
+      }).catch(err => console.error(`Failed to update stats for ${player}:`, err));
+    }
+  } else if (room.winner) {
+    // Find winner and loser
+    const winnerUsername = Object.entries(room.symbols).find(([_, sym]) => sym === room.winner)?.[0];
+    const loserUsername = room.players.find(p => p !== winnerUsername);
+    
+    if (winnerUsername) {
+      await fetch(`${USER_SERVICE_BASE}/users/${encodeURIComponent(winnerUsername)}/stats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result: 'win' })
+      }).catch(err => console.error(`Failed to update stats for ${winnerUsername}:`, err));
+    }
+    
+    if (loserUsername) {
+      await fetch(`${USER_SERVICE_BASE}/users/${encodeURIComponent(loserUsername)}/stats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result: 'loss' })
+      }).catch(err => console.error(`Failed to update stats for ${loserUsername}:`, err));
+    }
+  }
+}
+
 // Express + Socket.IO setup
 const app = express();
 app.use(cors());
@@ -239,6 +272,9 @@ io.on('connection', (socket) => {
       }
       if (room.winner || room.draw) {
         io.to(roomId).emit('game_over', { roomId, winner: room.winner, draw: room.draw });
+        
+        // Update player stats
+        updatePlayerStats(room).catch(err => console.error('Failed to update stats:', err));
       }
     } catch (err) {
       socket.emit('error', { error: err.message });
