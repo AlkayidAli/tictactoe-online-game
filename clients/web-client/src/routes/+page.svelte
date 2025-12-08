@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { io, Socket } from "socket.io-client";
+  import { ENV } from "$lib/config";
 
-  const ROOM_SERVICE_HTTP = "http://localhost:3002";
-  const USER_SERVICE_HTTP = "http://localhost:3001";
-  const ROOM_SERVICE_WS = "http://localhost:3002";
+  const ROOM_SERVICE_HTTP = ENV.ROOM_SERVICE;
+  const USER_SERVICE_HTTP = ENV.USER_SERVICE;
+  const ROOM_SERVICE_WS = ENV.ROOM_SERVICE_WS;
 
   // Game state
   let gameState = $state<"lobby" | "waiting" | "playing" | "finished">("lobby");
@@ -21,6 +22,10 @@
   let isMyTurn = $state(false);
   let socket: Socket | null = null;
 
+  // Leaderboard state
+  let leaderboard = $state<any[]>([]);
+  let showLeaderboard = $state(false);
+
   $effect(() => {
     console.log(
       "$effect running - mySymbol:",
@@ -34,10 +39,35 @@
       isMyTurn = mySymbol === nextTurnSymbol;
       if (gameState === "playing" && !winner && !isDraw) {
         statusMessage = isMyTurn
-          ? "🎮 Your turn! Click a cell to play."
-          : "⏳ Waiting for opponent...";
+          ? "Your turn - Click a cell to play"
+          : "Waiting for opponent...";
       }
     }
+  });
+
+  async function fetchLeaderboard() {
+    try {
+      console.log(
+        "Fetching leaderboard from:",
+        `${USER_SERVICE_HTTP}/leaderboard?limit=10`
+      );
+      const res = await fetch(`${USER_SERVICE_HTTP}/leaderboard?limit=10`);
+      if (res.ok) {
+        leaderboard = await res.json();
+        console.log("Leaderboard data:", leaderboard);
+      } else {
+        console.error("Leaderboard fetch failed with status:", res.status);
+      }
+    } catch (err) {
+      console.error("Failed to fetch leaderboard:", err);
+    }
+  }
+
+  onMount(() => {
+    fetchLeaderboard();
+    // Refresh leaderboard every 10 seconds
+    const interval = setInterval(fetchLeaderboard, 10000);
+    return () => clearInterval(interval);
   });
 
   async function registerUser() {
@@ -159,9 +189,12 @@
         if (w || draw) {
           gameState = "finished";
           if (w) {
-            statusMessage = w === mySymbol ? "🎉 You won!" : `${w} won!`;
+            statusMessage =
+              w === mySymbol
+                ? "Victory! You won the game"
+                : `${w} won the game`;
           } else if (draw) {
-            statusMessage = "🤝 It's a draw!";
+            statusMessage = "It's a draw";
           }
         }
       }
@@ -170,7 +203,7 @@
     socket.on("your_turn", ({ roomId: rid, symbol, player }) => {
       if (player === username) {
         isMyTurn = true;
-        statusMessage = "🎮 Your turn!";
+        statusMessage = "Your turn";
       }
     });
 
@@ -179,9 +212,10 @@
       winner = w;
       isDraw = draw;
       if (w) {
-        statusMessage = w === mySymbol ? "🎉 You won!" : `${w} won!`;
+        statusMessage =
+          w === mySymbol ? "Victory! You won the game" : `${w} won the game`;
       } else if (draw) {
-        statusMessage = "🤝 It's a draw!";
+        statusMessage = "It's a draw";
       }
     });
 
@@ -286,172 +320,344 @@
   });
 </script>
 
-<div class="container">
+<div class="app">
   <header class="header">
-    <h1 class="title">🎮 Tic-Tac-Toe Online</h1>
-    <p class="subtitle">Distributed Microservices Game</p>
+    <div class="header-content">
+      <div class="logo-section">
+        <h1 class="title">TIC-TAC-TOE ONLINE</h1>
+        <p class="subtitle">Real-time Multiplayer Game</p>
+      </div>
+      <button
+        class="btn btn-secondary btn-leaderboard"
+        onclick={() => (showLeaderboard = !showLeaderboard)}
+      >
+        {showLeaderboard ? "Close" : "Leaderboard"}
+      </button>
+    </div>
   </header>
 
-  {#if gameState === "lobby"}
-    <div class="lobby-container">
-      <div class="card lobby-card">
-        <h2 class="card-title">Welcome!</h2>
-
-        <div class="form-group">
-          <label for="username">Username</label>
-          <input
-            id="username"
-            type="text"
-            class="input-field"
-            bind:value={username}
-            placeholder="Enter your username"
-          />
-        </div>
-
-        <div class="form-group">
-          <label for="roomId">Room ID (optional)</label>
-          <input
-            id="roomId"
-            type="text"
-            class="input-field"
-            bind:value={roomId}
-            placeholder="Leave empty to create new room"
-          />
-        </div>
-
-        {#if errorMessage}
-          <div class="error-message">{errorMessage}</div>
+  <div class="main-content">
+    {#if showLeaderboard}
+      <div class="leaderboard-panel">
+        <h2 class="panel-title">Top Players</h2>
+        {#if leaderboard.length > 0}
+          <div class="leaderboard-list">
+            {#each leaderboard as player}
+              <div class="leaderboard-item">
+                <div class="rank">#{player.rank}</div>
+                <div class="player-info">
+                  <div class="player-name">{player.username}</div>
+                  <div class="player-stats">
+                    {player.stats.wins}W / {player.stats.losses}L / {player
+                      .stats.draws}D
+                  </div>
+                </div>
+                <div class="win-rate">{player.winRate}%</div>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty-state">No players yet. Be the first!</p>
         {/if}
-
-        <div class="button-group">
-          <button
-            class="btn btn-primary"
-            onclick={() => handleJoinOrCreate(true)}
-          >
-            Create New Room
-          </button>
-          <button
-            class="btn btn-success"
-            onclick={() => handleJoinOrCreate(false)}
-            disabled={!roomId.trim()}
-          >
-            Join Room
-          </button>
-        </div>
       </div>
-    </div>
-  {:else}
+    {/if}
+
     <div class="game-container">
-      <div class="game-info">
-        <div class="info-card">
-          <div class="info-row">
-            <span class="info-label">Room ID:</span>
-            <span class="info-value">
-              {roomId}
-              <button class="btn-copy" onclick={copyRoomId} title="Copy Room ID"
-                >📋</button
+      {#if gameState === "lobby"}
+        <div class="lobby-container">
+          <div class="card lobby-card">
+            <h2 class="card-title">Welcome!</h2>
+
+            <div class="form-group">
+              <label for="username">Username</label>
+              <input
+                id="username"
+                type="text"
+                class="input-field"
+                bind:value={username}
+                placeholder="Enter your username"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="roomId">Room ID (optional)</label>
+              <input
+                id="roomId"
+                type="text"
+                class="input-field"
+                bind:value={roomId}
+                placeholder="Leave empty to create new room"
+              />
+            </div>
+
+            {#if errorMessage}
+              <div class="error-message">{errorMessage}</div>
+            {/if}
+
+            <div class="button-group">
+              <button
+                class="btn btn-primary"
+                onclick={() => handleJoinOrCreate(true)}
               >
-            </span>
+                Create New Room
+              </button>
+              <button
+                class="btn btn-success"
+                onclick={() => handleJoinOrCreate(false)}
+                disabled={!roomId.trim()}
+              >
+                Join Room
+              </button>
+            </div>
           </div>
-          <div class="info-row">
-            <span class="info-label">Player:</span>
-            <span class="info-value">
-              {username}
-              {#if mySymbol}
-                <span
-                  class="player-symbol"
-                  class:symbol-x={mySymbol === "X"}
-                  class:symbol-o={mySymbol === "O"}
-                >
-                  ({mySymbol})
+        </div>
+      {:else}
+        <div class="game-container">
+          <div class="game-info">
+            <div class="info-card">
+              <div class="info-row">
+                <span class="info-label">Room ID:</span>
+                <span class="info-value">
+                  {roomId}
+                  <button
+                    class="btn-copy"
+                    onclick={copyRoomId}
+                    title="Copy Room ID">📋</button
+                  >
                 </span>
-              {/if}
-            </span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Player:</span>
+                <span class="info-value">
+                  {username}
+                  {#if mySymbol}
+                    <span
+                      class="player-symbol"
+                      class:symbol-x={mySymbol === "X"}
+                      class:symbol-o={mySymbol === "O"}
+                    >
+                      ({mySymbol})
+                    </span>
+                  {/if}
+                </span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Players:</span>
+                <span class="info-value"
+                  >{players.join(" vs ") || "Waiting..."}</span
+                >
+              </div>
+            </div>
+
+            {#if statusMessage}
+              <div
+                class="status-message"
+                class:my-turn={statusMessage.includes("Your turn")}
+              >
+                {statusMessage}
+              </div>
+            {/if}
+
+            {#if errorMessage}
+              <div class="error-message">{errorMessage}</div>
+            {/if}
           </div>
-          <div class="info-row">
-            <span class="info-label">Players:</span>
-            <span class="info-value"
-              >{players.join(" vs ") || "Waiting..."}</span
+
+          <div class="board-container">
+            <div class="board">
+              {#each currentBoard as cell, i}
+                <button
+                  class="cell"
+                  class:cell-x={cell === "X"}
+                  class:cell-o={cell === "O"}
+                  class:cell-clickable={gameState === "playing" &&
+                    isMyTurn &&
+                    cell === "" &&
+                    !winner &&
+                    !isDraw}
+                  onclick={() => handleCellClick(i)}
+                  disabled={gameState !== "playing" ||
+                    !isMyTurn ||
+                    cell !== "" ||
+                    !!winner ||
+                    isDraw}
+                >
+                  {#if cell === "X"}
+                    <span class="symbol symbol-x">X</span>
+                  {:else if cell === "O"}
+                    <span class="symbol symbol-o">O</span>
+                  {:else}
+                    <span class="cell-number">{i}</span>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <div class="game-actions">
+            {#if winner || isDraw}
+              <button class="btn btn-secondary" onclick={restartGame}
+                >Play Again</button
+              >
+            {/if}
+            <button class="btn btn-primary" onclick={resetGame}>New Game</button
             >
           </div>
         </div>
-
-        {#if statusMessage}
-          <div
-            class="status-message"
-            class:my-turn={statusMessage.includes("Your turn")}
-          >
-            {statusMessage}
-          </div>
-        {/if}
-
-        {#if errorMessage}
-          <div class="error-message">{errorMessage}</div>
-        {/if}
-      </div>
-
-      <div class="board-container">
-        <div class="board">
-          {#each currentBoard as cell, i}
-            <button
-              class="cell"
-              class:cell-x={cell === "X"}
-              class:cell-o={cell === "O"}
-              class:cell-clickable={gameState === "playing" &&
-                isMyTurn &&
-                cell === "" &&
-                !winner &&
-                !isDraw}
-              onclick={() => handleCellClick(i)}
-              disabled={gameState !== "playing" ||
-                !isMyTurn ||
-                cell !== "" ||
-                !!winner ||
-                isDraw}
-            >
-              {#if cell === "X"}
-                <span class="symbol symbol-x">X</span>
-              {:else if cell === "O"}
-                <span class="symbol symbol-o">O</span>
-              {:else}
-                <span class="cell-number">{i}</span>
-              {/if}
-            </button>
-          {/each}
-        </div>
-      </div>
-
-      <div class="game-actions">
-        {#if winner || isDraw}
-          <button class="btn btn-secondary" onclick={restartGame}
-            >Play Again</button
-          >
-        {/if}
-        <button class="btn btn-primary" onclick={resetGame}>New Game</button>
-      </div>
+      {/if}
     </div>
-  {/if}
+  </div>
 </div>
 
 <style>
-  .header {
+  .app {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .main-content {
+    flex: 1;
+    display: flex;
+    gap: 2rem;
+    max-width: 1600px;
+    margin: 0 auto;
+    width: 100%;
+    padding: 0 2rem 2rem;
+  }
+
+  .game-container {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .leaderboard-panel {
+    width: 350px;
+    background: var(--color-surface);
+    border-radius: var(--border-radius);
+    padding: 1.5rem;
+    box-shadow: var(--shadow);
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+    position: sticky;
+    top: 2rem;
+  }
+
+  .panel-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+    color: var(--color-primary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .leaderboard-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .leaderboard-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--color-bg);
+    border-radius: var(--border-radius-sm);
+    border: 1px solid var(--color-border);
+    transition: var(--transition);
+  }
+
+  .leaderboard-item:hover {
+    border-color: var(--color-primary);
+    transform: translateX(4px);
+  }
+
+  .rank {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--color-primary);
+    min-width: 40px;
+  }
+
+  .player-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .player-name {
+    font-weight: 600;
+    font-size: 1.1rem;
+    color: var(--color-text);
+    margin-bottom: 0.25rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .player-stats {
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+  }
+
+  .win-rate {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--color-success);
+    min-width: 60px;
+    text-align: right;
+  }
+
+  .empty-state {
     text-align: center;
-    margin-bottom: 3rem;
+    color: var(--color-text-dim);
+    padding: 2rem 1rem;
+  }
+
+  .header-content {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .logo-section {
+    flex: 1;
+  }
+
+  .btn-leaderboard {
+    padding: 0.75rem 1.5rem;
+    font-size: 0.95rem;
+  }
+
+  .header {
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    box-shadow: var(--shadow-sm);
   }
 
   .title {
-    font-size: 3rem;
+    font-size: 2.5rem;
     font-weight: 800;
-    background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+    background: linear-gradient(
+      135deg,
+      var(--color-primary),
+      var(--color-secondary)
+    );
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    letter-spacing: 2px;
     margin-bottom: 0.5rem;
   }
 
   .subtitle {
-    color: var(--color-text-dim);
-    font-size: 1.125rem;
+    font-size: 1rem;
+    color: var(--color-text-secondary);
+    font-weight: 500;
   }
 
   .lobby-container {
@@ -697,9 +903,36 @@
     margin-top: 2rem;
   }
 
+  @media (max-width: 1024px) {
+    .main-content {
+      flex-direction: column;
+    }
+
+    .leaderboard-panel {
+      width: 100%;
+      max-width: 600px;
+      margin: 0 auto;
+      position: static;
+    }
+  }
+
   @media (max-width: 640px) {
     .title {
-      font-size: 2rem;
+      font-size: 1.5rem;
+    }
+
+    .subtitle {
+      font-size: 0.85rem;
+    }
+
+    .header-content {
+      flex-direction: column;
+      gap: 1rem;
+      padding: 1rem;
+    }
+
+    .btn-leaderboard {
+      width: 100%;
     }
 
     .board {
@@ -712,6 +945,14 @@
 
     .button-group {
       flex-direction: column;
+    }
+
+    .leaderboard-panel {
+      padding: 1rem;
+    }
+
+    .panel-title {
+      font-size: 1.25rem;
     }
   }
 </style>
