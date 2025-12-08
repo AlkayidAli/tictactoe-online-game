@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { io, Socket } from "socket.io-client";
+  import { ENV } from "$lib/config";
 
-  const ROOM_SERVICE_HTTP = "http://localhost:3002";
-  const USER_SERVICE_HTTP = "http://localhost:3001";
-  const ROOM_SERVICE_WS = "http://localhost:3002";
+  const ROOM_SERVICE_HTTP = ENV.ROOM_SERVICE;
+  const USER_SERVICE_HTTP = ENV.USER_SERVICE;
+  const ROOM_SERVICE_WS = ENV.ROOM_SERVICE_WS;
 
   // Game state
   let gameState = $state<"lobby" | "waiting" | "playing" | "finished">("lobby");
